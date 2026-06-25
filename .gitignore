@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.local
+.evn.develoment
+!.env.example
+dist/
+build/
+coverege/ 
+*.log
