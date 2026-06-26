@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.js",
-    "build": "echo no build needed",
     "start": "node src/server.js"
   },
   "keywords": [],
