@@ -4,7 +4,7 @@ let cached = global.mongooseConn;
 if (!cached) cached = global.mongooseConn = {conn: null, promise: null};
 
 
-export async function connetToDB(){
+export async function connectToDB(){
     if(cached.conn) return cached.conn;
     if (!cached.promise){
         const {MONGO_URI} = process.env;
