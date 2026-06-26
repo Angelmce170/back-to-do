@@ -18,13 +18,17 @@ app.use(cors({
 app.use(express.json());
 app.use(morgan("dev"));
 
-app.use(async (_req, _res, next ) => {
-    try{
-        await connectToDB(); next();
-    }catch (e) {next(e);}
+app.use(async (_req, _res, next) => {
+  try {
+    await connectToDB();
+    next();
+  } catch (e) {
+    next(e);
+  }
 });
 
 app.get("/", (_req, res) => res.json({ ok: true, name: "ToDo Api" }));
+
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
 
