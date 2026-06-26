@@ -4,8 +4,12 @@
   "description": "",
   "main": "src/server.js",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.js",
+    "dev": "nodemon src/server.js",
+    "build": "echo no build needed",
     "start": "node src/server.js"
   },
   "keywords": [],
@@ -23,8 +27,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "nodemon": "^3.1.14",
-    "ts-node-dev": "^2.0.0"
+    "nodemon": "^3.1.14"
   }
 }
