@@ -1,4 +1,4 @@
-import Task from "../models/Task.js";
+import Task from "../Models/Task.js";
 
 const allowed = ["Pendiente", "En Progreso", "Completada"]; // <-- usa este nombre en todos lados
 
