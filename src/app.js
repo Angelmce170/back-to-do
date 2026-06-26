@@ -18,7 +18,13 @@ app.use(cors({
 app.use(express.json());
 app.use(morgan("dev"));
 
-app.use(async (_req, _res, next) => {
+// Esta ruta va ANTES de conectar a Mongo
+app.get("/", (_req, res) => {
+  res.json({ ok: true, name: "ToDo Api" });
+});
+
+// Mongo solo para rutas de API
+app.use("/api", async (_req, _res, next) => {
   try {
     await connectToDB();
     next();
@@ -27,9 +33,16 @@ app.use(async (_req, _res, next) => {
   }
 });
 
-app.get("/", (_req, res) => res.json({ ok: true, name: "ToDo Api" }));
-
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
+
+// Para que Vercel muestre error JSON y no crashee feo
+app.use((err, _req, res, _next) => {
+  console.error("ERROR API:", err);
+  res.status(500).json({
+    ok: false,
+    error: err.message || "Error interno"
+  });
+});
 
 export default app;
