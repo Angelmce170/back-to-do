@@ -7,11 +7,21 @@ import { connectToDB } from "./db/connect.js";
 
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://front-to-do.vercel.app",
+  process.env.FRONT_ORIGIN || ""
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    process.env.FRONT_ORIGIN || ""
-  ].filter(Boolean),
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+
+    const isAllowedOrigin = allowedOrigins.includes(origin);
+    const isVercelApp = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+
+    callback(null, isAllowedOrigin || isVercelApp);
+  },
   credentials: true
 }));
 
