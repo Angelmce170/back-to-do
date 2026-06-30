@@ -19,6 +19,10 @@ const userShema = new mongoose.Schema(
     password:{
         type: String,
         required: true,
+    },
+    avatarColor:{
+        type: String,
+        default: "#2a8b7b"
     }
         },
     {timestamps: true}    

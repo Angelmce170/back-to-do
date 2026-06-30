@@ -2,6 +2,15 @@ import User from "../models/user.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+const avatarColors = ["#2a8b7b", "#2563eb", "#7c3aed", "#dc2626", "#ea580c", "#475569", "#111827"];
+const normalizeAvatarColor = (value) => avatarColors.includes(value) ? value : avatarColors[0];
+const userPayload = (user) => ({
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    avatarColor: normalizeAvatarColor(user.avatarColor)
+});
+
 export async function register(req, res) {
     try{
         const {name, email, password} = req.body;
@@ -17,7 +26,7 @@ export async function register(req, res) {
         await user.save();
 
         const token = jwt.sign({id: user._id}, process.env.JWT_SECRET, {expiresIn: '1d'});
-        res.status(201).json({token, user:{id: user._id, name: user.name, email: user.email}});
+        res.status(201).json({token, user: userPayload(user)});
     } catch(e){
         res.status(500).json({ok: false, message: 'Error en el servidor', error: e.message});
     }
@@ -34,7 +43,7 @@ export async function login(req, res) {
         if(!ok) return res.status(401).json({ message: 'Email o constraseña incorrecta'});
 
         const token = jwt.sign({id: user._id}, process.env.JWT_SECRET || 'changeme',{expiresIn: '1d'});
-        res.json({token, user:{id: user._id, name: user.name, email: user.email}});
+        res.json({token, user: userPayload(user)});
         
     } catch(e){
         res.status(500).json({message: 'Error del servidor no jala, ni lo intentes madafaker'});
@@ -44,10 +53,10 @@ export async function login(req, res) {
 
 export async function me(req, res) {
     try {
-        const user = await User.findById(req.userId).select("_id name email");
+        const user = await User.findById(req.userId).select("_id name email avatarColor");
         if (!user) return res.status(404).json({message: "Usuario no encontrado"});
 
-        res.json({user: {id: user._id, name: user.name, email: user.email}});
+        res.json({user: userPayload(user)});
     } catch {
         res.status(500).json({message: "Error al obtener perfil"});
     }
@@ -55,7 +64,7 @@ export async function me(req, res) {
 
 export async function updateProfile(req, res) {
     try {
-        const {name, email, password} = req.body;
+        const {name, email, password, avatarColor} = req.body;
         const user = await User.findById(req.userId);
         if (!user) return res.status(404).json({message: "Usuario no encontrado"});
 
@@ -71,13 +80,14 @@ export async function updateProfile(req, res) {
 
         user.name = nextName;
         user.email = nextEmail;
+        user.avatarColor = normalizeAvatarColor(avatarColor || user.avatarColor);
 
         if (typeof password === "string" && password.trim()) {
             user.password = await bcrypt.hash(password, 10);
         }
 
         await user.save();
-        res.json({user: {id: user._id, name: user.name, email: user.email}});
+        res.json({user: userPayload(user)});
     } catch (e) {
         res.status(500).json({message: "Error al actualizar perfil", error: e.message});
     }
