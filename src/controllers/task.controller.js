@@ -2,13 +2,21 @@ import Task from "../models/task.js";
 
 const allowed = ["Pendiente", "En Progreso", "Completada"]; // <-- usa este nombre en todos lados
 
+function parseReminderAt(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export async function list(req, res) {
   const items = await Task.find({ user: req.userId, deleted: false }).sort({ createdAt: -1 });
   res.json({ items });
 }
 
 export async function create(req, res) {
-  const { title, description = "", status = "Pendiente", clienteId } = req.body;
+  const { title, description = "", status = "Pendiente", clienteId, reminderAt } = req.body;
   if (!title) return res.status(400).json({ message: "El título es requerido" });
 
   const task = await Task.create({
@@ -16,6 +24,7 @@ export async function create(req, res) {
     title,
     description,
     status: allowed.includes(status) ? status : "Pendiente", // <-- allowed
+    reminderAt: parseReminderAt(reminderAt) ?? null,
     clienteId,
   });
   res.status(201).json({ task });
@@ -23,14 +32,20 @@ export async function create(req, res) {
 
 export async function update(req, res) {
   const { id } = req.params;
-  const { title, description, status } = req.body;
+  const { title, description, status, reminderAt } = req.body;
 
   if (status && !allowed.includes(status))
     return res.status(400).json({ message: "Estado inválido" });
 
+  const changes = {};
+  if (title !== undefined) changes.title = title;
+  if (description !== undefined) changes.description = description;
+  if (status !== undefined) changes.status = status;
+  if (reminderAt !== undefined) changes.reminderAt = parseReminderAt(reminderAt);
+
   const task = await Task.findOneAndUpdate(
     { _id: id, user: req.userId },
-    { title, description, status },
+    changes,
     { new: true }
   );
   if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
@@ -63,6 +78,7 @@ export async function bulksync(req, res) {
         title: String(t.title),
         description: t.description ?? "",
         status: allowed.includes(t.status) ? t.status : "Pendiente",
+        reminderAt: parseReminderAt(t.reminderAt) ?? null,
       }));
 
     if (!clean.length) return res.json({ mapping: [] });
@@ -76,6 +92,7 @@ export async function bulksync(req, res) {
             title: t.title,
             description: t.description,
             status: t.status,
+            reminderAt: t.reminderAt,
           },
           $setOnInsert: {
             user: req.userId,

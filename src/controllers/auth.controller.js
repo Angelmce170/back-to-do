@@ -41,3 +41,44 @@ export async function login(req, res) {
     }
 
 }
+
+export async function me(req, res) {
+    try {
+        const user = await User.findById(req.userId).select("_id name email");
+        if (!user) return res.status(404).json({message: "Usuario no encontrado"});
+
+        res.json({user: {id: user._id, name: user.name, email: user.email}});
+    } catch {
+        res.status(500).json({message: "Error al obtener perfil"});
+    }
+}
+
+export async function updateProfile(req, res) {
+    try {
+        const {name, email, password} = req.body;
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({message: "Usuario no encontrado"});
+
+        const nextName = typeof name === "string" ? name.trim() : "";
+        const nextEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+
+        if (!nextName || !nextEmail) {
+            return res.status(400).json({message: "Nombre y correo son obligatorios"});
+        }
+
+        const exist = await User.findOne({email: nextEmail, _id: {$ne: user._id}});
+        if (exist) return res.status(409).json({message: "Ese correo ya está registrado"});
+
+        user.name = nextName;
+        user.email = nextEmail;
+
+        if (typeof password === "string" && password.trim()) {
+            user.password = await bcrypt.hash(password, 10);
+        }
+
+        await user.save();
+        res.json({user: {id: user._id, name: user.name, email: user.email}});
+    } catch (e) {
+        res.status(500).json({message: "Error al actualizar perfil", error: e.message});
+    }
+}

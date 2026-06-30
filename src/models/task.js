@@ -18,8 +18,12 @@ const taskShema = new mongoose.Schema(
         },
         status:{
             type: String,
-            enum:['Pendiente', 'En proceso', 'Completada'],
+            enum:['Pendiente', 'En Progreso', 'Completada'],
             default:'Pendiente',
+        },
+        reminderAt:{
+            type: Date,
+            default: null
         },
         clienteId:{
             type: String,
