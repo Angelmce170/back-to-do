@@ -2,7 +2,13 @@ import admin from "firebase-admin";
 
 function readServiceAccount() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+    return {
+      projectId: serviceAccount.projectId || serviceAccount.project_id,
+      clientEmail: serviceAccount.clientEmail || serviceAccount.client_email,
+      privateKey: (serviceAccount.privateKey || serviceAccount.private_key || "").replace(/\\n/g, "\n"),
+    };
   }
 
   const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
