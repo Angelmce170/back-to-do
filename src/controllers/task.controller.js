@@ -25,6 +25,7 @@ export async function create(req, res) {
     description,
     status: allowed.includes(status) ? status : "Pendiente", // <-- allowed
     reminderAt: parseReminderAt(reminderAt) ?? null,
+    reminderSentAt: null,
     clienteId,
   });
   res.status(201).json({ task });
@@ -41,7 +42,15 @@ export async function update(req, res) {
   if (title !== undefined) changes.title = title;
   if (description !== undefined) changes.description = description;
   if (status !== undefined) changes.status = status;
-  if (reminderAt !== undefined) changes.reminderAt = parseReminderAt(reminderAt);
+  if (reminderAt !== undefined) {
+    const parsedReminderAt = parseReminderAt(reminderAt);
+    if (parsedReminderAt === undefined) {
+      return res.status(400).json({ message: "Recordatorio inválido" });
+    }
+
+    changes.reminderAt = parsedReminderAt;
+    changes.reminderSentAt = null;
+  }
 
   const task = await Task.findOneAndUpdate(
     { _id: id, user: req.userId },
@@ -93,6 +102,7 @@ export async function bulksync(req, res) {
             description: t.description,
             status: t.status,
             reminderAt: t.reminderAt,
+            reminderSentAt: null,
           },
           $setOnInsert: {
             user: req.userId,

@@ -23,6 +23,10 @@ const userShema = new mongoose.Schema(
     avatarColor:{
         type: String,
         default: "#2a8b7b"
+    },
+    fcmTokens:{
+        type: [String],
+        default: []
     }
         },
     {timestamps: true}    

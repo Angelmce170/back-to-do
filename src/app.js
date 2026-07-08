@@ -3,6 +3,7 @@ import cors from "cors";
 import morgan from "morgan";
 import authRoutes from "./routes/auth.routes.js";
 import taskRoutes from "./routes/task.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import { connectToDB } from "./db/connect.js";
 
 const app = express();
@@ -45,6 +46,7 @@ app.use("/api", async (_req, _res, next) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Para que Vercel muestre error JSON y no crashee feo
 app.use((err, _req, res, _next) => {
