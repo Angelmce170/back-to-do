@@ -16,14 +16,14 @@ function readServiceAccount() {
 }
 
 export function getFirebaseAdmin() {
-  if (admin.apps.length) return admin;
+  if (admin.getApps().length) return admin;
 
   try {
     const serviceAccount = readServiceAccount();
     if (!serviceAccount) return null;
 
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: admin.cert(serviceAccount),
     });
 
     return admin;
