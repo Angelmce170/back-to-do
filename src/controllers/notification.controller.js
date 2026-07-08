@@ -91,7 +91,9 @@ export async function sendDueReminders(req, res) {
 
   const userIds = [...new Set(tasks.map((task) => String(task.user)))];
   const users = await User.find({ _id: { $in: userIds } }).select("_id fcmTokens");
-  const tokensByUser = new Map(users.map((user) => [String(user._id), user.fcmTokens || []]));
+  const tokensByUser = new Map(
+    users.map((user) => [String(user._id), (user.fcmTokens || []).filter(Boolean)])
+  );
   const sent = [];
 
   for (const task of tasks) {
@@ -139,9 +141,7 @@ export async function cronStatus(req, res) {
     reminderAt: { $ne: null, $lte: now },
     reminderSentAt: null,
   });
-  const usersWithTokens = await User.countDocuments({
-    fcmTokens: { $exists: true, $ne: [] },
-  });
+  const usersWithTokens = await User.countDocuments({ "fcmTokens.0": { $exists: true } });
 
   res.json({
     ok: true,
