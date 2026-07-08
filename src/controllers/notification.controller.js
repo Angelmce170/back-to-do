@@ -17,12 +17,35 @@ function cronIsAllowed(req) {
   );
 }
 
+function envValue(name) {
+  const value = process.env[name];
+  if (typeof value !== "string") return "";
+
+  return value.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function webPushConfig() {
+  const publicKey = envValue("WEB_PUSH_PUBLIC_KEY") || envValue("VAPID_PUBLIC_KEY");
+  const privateKey = envValue("WEB_PUSH_PRIVATE_KEY") || envValue("VAPID_PRIVATE_KEY");
+  const subject = envValue("WEB_PUSH_SUBJECT") || envValue("VAPID_SUBJECT") || "mailto:todo-pwa@example.com";
+
+  return { publicKey, privateKey, subject };
+}
+
+function missingWebPushEnv() {
+  const { publicKey, privateKey } = webPushConfig();
+  const missing = [];
+
+  if (!publicKey) missing.push("WEB_PUSH_PUBLIC_KEY");
+  if (!privateKey) missing.push("WEB_PUSH_PRIVATE_KEY");
+
+  return missing;
+}
+
 function getWebPush() {
-  const publicKey = process.env.WEB_PUSH_PUBLIC_KEY;
-  const privateKey = process.env.WEB_PUSH_PRIVATE_KEY;
+  const { publicKey, privateKey, subject } = webPushConfig();
   if (!publicKey || !privateKey) return null;
 
-  const subject = process.env.WEB_PUSH_SUBJECT || "mailto:todo-pwa@example.com";
   webpush.setVapidDetails(subject, publicKey, privateKey);
 
   return webpush;
@@ -68,8 +91,13 @@ async function removeInvalidSubscriptions(userId, endpoints) {
 }
 
 export async function publicKey(_req, res) {
-  const key = process.env.WEB_PUSH_PUBLIC_KEY;
-  if (!key) return res.status(503).json({ message: "Web Push no está configurado" });
+  const key = webPushConfig().publicKey;
+  if (!key) {
+    return res.status(503).json({
+      message: "Web Push no está configurado",
+      missing: missingWebPushEnv(),
+    });
+  }
 
   res.json({ publicKey: key });
 }
@@ -184,6 +212,7 @@ export async function cronStatus(req, res) {
   res.json({
     ok: true,
     webPushConfigured: Boolean(getWebPush()),
+    missingWebPushEnv: missingWebPushEnv(),
     pendingReminders,
     usersWithSubscriptions,
     serverTime: now.toISOString(),
