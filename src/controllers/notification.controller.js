@@ -1,11 +1,6 @@
 import Task from "../models/task.js";
 import User from "../models/user.js";
-import { getFirebaseAdmin } from "../firebase.js";
-
-const invalidTokenCodes = new Set([
-  "messaging/invalid-registration-token",
-  "messaging/registration-token-not-registered",
-]);
+import webpush from "web-push";
 
 function cleanToken(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -20,6 +15,32 @@ function cronIsAllowed(req) {
     req.query?.secret === secret ||
     req.params?.secret === secret
   );
+}
+
+function getWebPush() {
+  const publicKey = process.env.WEB_PUSH_PUBLIC_KEY;
+  const privateKey = process.env.WEB_PUSH_PRIVATE_KEY;
+  if (!publicKey || !privateKey) return null;
+
+  const subject = process.env.WEB_PUSH_SUBJECT || "mailto:todo-pwa@example.com";
+  webpush.setVapidDetails(subject, publicKey, privateKey);
+
+  return webpush;
+}
+
+function cleanSubscription(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const endpoint = cleanToken(value.endpoint);
+  const p256dh = cleanToken(value.keys?.p256dh);
+  const auth = cleanToken(value.keys?.auth);
+  if (!endpoint || !p256dh || !auth) return null;
+
+  return {
+    endpoint,
+    expirationTime: value.expirationTime ?? null,
+    keys: { p256dh, auth },
+  };
 }
 
 function taskMessage(task) {
@@ -38,31 +59,43 @@ function taskMessage(task) {
   };
 }
 
-async function removeInvalidTokens(userId, tokens) {
-  if (!tokens.length) return;
+async function removeInvalidSubscriptions(userId, endpoints) {
+  if (!endpoints.length) return;
 
   await User.findByIdAndUpdate(userId, {
-    $pull: { fcmTokens: { $in: tokens } },
+    $pull: { pushSubscriptions: { endpoint: { $in: endpoints } } },
   });
 }
 
-export async function saveToken(req, res) {
-  const token = cleanToken(req.body?.token);
-  if (!token) return res.status(400).json({ message: "Token de Firebase requerido" });
+export async function publicKey(_req, res) {
+  const key = process.env.WEB_PUSH_PUBLIC_KEY;
+  if (!key) return res.status(503).json({ message: "Web Push no está configurado" });
 
-  await User.findByIdAndUpdate(req.userId, {
-    $addToSet: { fcmTokens: token },
-  });
+  res.json({ publicKey: key });
+}
+
+export async function saveSubscription(req, res) {
+  const subscription = cleanSubscription(req.body?.subscription ?? req.body);
+  if (!subscription) return res.status(400).json({ message: "Suscripción web push requerida" });
+
+  const user = await User.findById(req.userId).select("pushSubscriptions");
+  if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+
+  user.pushSubscriptions = (user.pushSubscriptions || []).filter(
+    (item) => item?.endpoint !== subscription.endpoint
+  );
+  user.pushSubscriptions.push(subscription);
+  await user.save();
 
   res.json({ ok: true });
 }
 
-export async function deleteToken(req, res) {
-  const token = cleanToken(req.body?.token);
-  if (!token) return res.json({ ok: true });
+export async function deleteSubscription(req, res) {
+  const endpoint = cleanToken(req.body?.endpoint ?? req.body?.subscription?.endpoint);
+  if (!endpoint) return res.json({ ok: true });
 
   await User.findByIdAndUpdate(req.userId, {
-    $pull: { fcmTokens: token },
+    $pull: { pushSubscriptions: { endpoint } },
   });
 
   res.json({ ok: true });
@@ -73,9 +106,9 @@ export async function sendDueReminders(req, res) {
     return res.status(401).json({ message: "No autorizado" });
   }
 
-  const firebase = getFirebaseAdmin();
-  if (!firebase) {
-    return res.status(503).json({ message: "Firebase no está configurado" });
+  const pusher = getWebPush();
+  if (!pusher) {
+    return res.status(503).json({ message: "Web Push no está configurado" });
   }
 
   const now = new Date();
@@ -90,33 +123,38 @@ export async function sendDueReminders(req, res) {
   if (!tasks.length) return res.json({ ok: true, sent: [] });
 
   const userIds = [...new Set(tasks.map((task) => String(task.user)))];
-  const users = await User.find({ _id: { $in: userIds } }).select("_id fcmTokens");
+  const users = await User.find({ _id: { $in: userIds } }).select("_id pushSubscriptions");
   const tokensByUser = new Map(
-    users.map((user) => [String(user._id), (user.fcmTokens || []).filter(Boolean)])
+    users.map((user) => [String(user._id), (user.pushSubscriptions || []).filter(Boolean)])
   );
   const sent = [];
 
   for (const task of tasks) {
-    const tokens = tokensByUser.get(String(task.user)) || [];
-    if (!tokens.length) continue;
+    const subscriptions = tokensByUser.get(String(task.user)) || [];
+    if (!subscriptions.length) continue;
 
-    const response = await firebase.messaging().sendEachForMulticast({
-      tokens,
-      data: taskMessage(task),
-      webpush: {
-        headers: {
-          Urgency: "high",
-        },
-      },
-    });
+    let successCount = 0;
+    const invalidEndpoints = [];
+    const payload = JSON.stringify(taskMessage(task));
 
-    const invalidTokens = response.responses
-      .map((result, index) => (result.error && invalidTokenCodes.has(result.error.code) ? tokens[index] : null))
-      .filter(Boolean);
+    await Promise.all(
+      subscriptions.map(async (subscription) => {
+        try {
+          await pusher.sendNotification(subscription, payload);
+          successCount += 1;
+        } catch (error) {
+          if (error?.statusCode === 404 || error?.statusCode === 410) {
+            invalidEndpoints.push(subscription.endpoint);
+          } else {
+            console.error("web push error:", error?.message || error);
+          }
+        }
+      })
+    );
 
-    await removeInvalidTokens(task.user, invalidTokens);
+    await removeInvalidSubscriptions(task.user, invalidEndpoints);
 
-    if (response.successCount > 0) {
+    if (successCount > 0) {
       task.reminderSentAt = now;
       await task.save();
       sent.push({
@@ -141,13 +179,13 @@ export async function cronStatus(req, res) {
     reminderAt: { $ne: null, $lte: now },
     reminderSentAt: null,
   });
-  const usersWithTokens = await User.countDocuments({ "fcmTokens.0": { $exists: true } });
+  const usersWithSubscriptions = await User.countDocuments({ "pushSubscriptions.0": { $exists: true } });
 
   res.json({
     ok: true,
-    firebaseConfigured: Boolean(getFirebaseAdmin()),
+    webPushConfigured: Boolean(getWebPush()),
     pendingReminders,
-    usersWithTokens,
+    usersWithSubscriptions,
     serverTime: now.toISOString(),
   });
 }
