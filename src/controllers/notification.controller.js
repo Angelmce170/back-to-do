@@ -15,7 +15,11 @@ function cronIsAllowed(req) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
 
-  return req.headers["x-cron-secret"] === secret || req.query?.secret === secret;
+  return (
+    req.headers["x-cron-secret"] === secret ||
+    req.query?.secret === secret ||
+    req.params?.secret === secret
+  );
 }
 
 function taskMessage(task) {
@@ -121,4 +125,29 @@ export async function sendDueReminders(req, res) {
   }
 
   res.json({ ok: true, sent });
+}
+
+export async function cronStatus(req, res) {
+  if (!cronIsAllowed(req)) {
+    return res.status(401).json({ message: "No autorizado" });
+  }
+
+  const now = new Date();
+  const pendingReminders = await Task.countDocuments({
+    deleted: false,
+    status: { $ne: "Completada" },
+    reminderAt: { $ne: null, $lte: now },
+    reminderSentAt: null,
+  });
+  const usersWithTokens = await User.countDocuments({
+    fcmTokens: { $exists: true, $ne: [] },
+  });
+
+  res.json({
+    ok: true,
+    firebaseConfigured: Boolean(getFirebaseAdmin()),
+    pendingReminders,
+    usersWithTokens,
+    serverTime: now.toISOString(),
+  });
 }
