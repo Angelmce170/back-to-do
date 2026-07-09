@@ -324,7 +324,7 @@ export async function createProject(req, res) {
 
   const mode = req.body.mode === "group" ? "group" : "individual";
   const requestedLimit = Number(req.body.participantLimit || (mode === "group" ? 5 : 1));
-  const participantLimit = mode === "group" ? Math.min(Math.max(requestedLimit, 2), 50) : 1;
+  const participantLimit = mode === "group" ? Math.min(Math.max(requestedLimit, 1), 50) : 1;
   const attachment = cleanAttachment(req.body.attachment);
   const project = await Project.create({
     creator: req.userId,
