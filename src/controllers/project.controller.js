@@ -231,8 +231,20 @@ async function pushToUser(userIdValue, payload) {
   }
 }
 
+function projectAlertUrl(project, data = {}) {
+  const params = new URLSearchParams({ project: String(project._id) });
+  if (data.chat === "group" || data.chat === "direct") params.set("chat", data.chat);
+  if (data.chatUserId) params.set("chatUser", String(data.chatUserId));
+
+  return `/dashboard?${params.toString()}`;
+}
+
 async function createProjectAlert({ user, project, type, title, body, data = {} }) {
-  if (!user || sameId(user, project.creator)) return;
+  if (!user) return;
+  const alertData = {
+    projectId: String(project._id),
+    ...data,
+  };
 
   await ProjectAlert.create({
     user,
@@ -240,13 +252,13 @@ async function createProjectAlert({ user, project, type, title, body, data = {} 
     type,
     title,
     body,
-    data,
+    data: alertData,
   });
 
   await pushToUser(user, {
     title,
     body,
-    url: `/dashboard?project=${project._id}`,
+    url: data.url || projectAlertUrl(project, alertData),
     icon: "/icons/icon-192x192.png",
     tag: `project-${type}-${project._id}-${Date.now()}`,
   });
@@ -670,6 +682,8 @@ export async function sendProjectMessage(req, res) {
     return res.status(400).json({ message: "Selecciona un miembro para chat individual" });
   }
 
+  const sender = await User.findById(req.userId).select("name email avatarColor");
+  const senderName = sender?.name || "Usuario";
   project.messages.push({
     scope,
     to,
@@ -690,9 +704,14 @@ export async function sendProjectMessage(req, res) {
         user: id,
         project,
         type: "message",
-        title: `Mensaje en ${project.title}`,
-        body: textValue.length > 90 ? `${textValue.slice(0, 87)}...` : textValue,
-        data: { projectId: String(project._id), chat: scope },
+        title: scope === "group" ? `Mensaje en ${project.title}` : `Mensaje de ${senderName}`,
+        body: `${senderName}: ${textValue.length > 90 ? `${textValue.slice(0, 87)}...` : textValue}`,
+        data: {
+          chat: scope,
+          chatUserId: scope === "direct" ? String(req.userId) : "",
+          authorId: String(req.userId),
+          authorName: senderName,
+        },
       })
     )
   );
