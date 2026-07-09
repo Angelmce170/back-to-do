@@ -24,6 +24,10 @@ const userShema = new mongoose.Schema(
         type: String,
         default: "#2a8b7b"
     },
+    friends:[{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+    }],
     pushSubscriptions:{
         type: [mongoose.Schema.Types.Mixed],
         default: []
