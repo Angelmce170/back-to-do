@@ -7,6 +7,7 @@ import User from "../models/user.js";
 
 const allowedStatuses = ["Pendiente", "En Progreso", "Completada"];
 const maxAttachmentSize = 4 * 1024 * 1024;
+const alertRetentionMs = 1000 * 60 * 60 * 24 * 183;
 
 function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
@@ -51,6 +52,17 @@ function cleanUserIds(value) {
       .map((id) => String(id))
       .filter((id) => isObjectId(id))
   )];
+}
+
+function alertLimit(value) {
+  const limit = Number(value || 60);
+  return Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 500) : 60;
+}
+
+async function cleanupOldAlerts() {
+  await ProjectAlert.deleteMany({
+    createdAt: { $lt: new Date(Date.now() - alertRetentionMs) },
+  });
 }
 
 function envValue(name) {
@@ -799,13 +811,21 @@ export async function addFriend(req, res) {
 }
 
 export async function listAlerts(req, res) {
-  const alerts = await ProjectAlert.find({ user: req.userId })
-    .sort({ createdAt: -1 })
-    .limit(60)
-    .populate("project", "title inviteCode")
-    .lean();
+  await cleanupOldAlerts();
 
-  res.json({ items: alerts });
+  const query = { user: req.userId };
+  const limit = alertLimit(req.query.limit);
+  const [alerts, unreadCount, total] = await Promise.all([
+    ProjectAlert.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate("project", "title inviteCode")
+      .lean(),
+    ProjectAlert.countDocuments({ ...query, read: false }),
+    ProjectAlert.countDocuments(query),
+  ]);
+
+  res.json({ items: alerts, unreadCount, total });
 }
 
 export async function markAlertRead(req, res) {
@@ -813,6 +833,12 @@ export async function markAlertRead(req, res) {
     { _id: req.params.id, user: req.userId },
     { read: true }
   );
+
+  res.json({ ok: true });
+}
+
+export async function deleteAlert(req, res) {
+  await ProjectAlert.findOneAndDelete({ _id: req.params.id, user: req.userId });
 
   res.json({ ok: true });
 }

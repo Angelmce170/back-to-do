@@ -19,4 +19,6 @@ const projectAlertSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+projectAlertSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 183 });
+
 export default mongoose.model("ProjectAlert", projectAlertSchema);

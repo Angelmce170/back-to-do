@@ -6,6 +6,7 @@ import {
   addTaskComment,
   createProject,
   createProjectTask,
+  deleteAlert,
   inviteByEmail,
   inviteFriends,
   joinByCode,
@@ -31,6 +32,7 @@ router.post("/friends", addFriend);
 
 router.get("/alerts", listAlerts);
 router.patch("/alerts/:id/read", markAlertRead);
+router.delete("/alerts/:id", deleteAlert);
 
 router.post("/join/:code", joinByCode);
 router.get("/", listProjects);
