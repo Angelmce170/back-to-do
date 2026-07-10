@@ -8,6 +8,7 @@ import User from "../models/user.js";
 const allowedStatuses = ["Pendiente", "En Progreso", "Completada"];
 const maxAttachmentSize = 4 * 1024 * 1024;
 const alertRetentionMs = 1000 * 60 * 60 * 24 * 183;
+const presenceTimeoutMs = 9000;
 
 function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
@@ -184,7 +185,7 @@ function serializeProject(project, currentUserId) {
   item.presence = (item.presence || [])
     .filter((presence) => {
       const updatedAt = new Date(presence.updatedAt).getTime();
-      return !sameId(presence.user, currentUserId) && now - updatedAt < 20000;
+      return !sameId(presence.user, currentUserId) && now - updatedAt < presenceTimeoutMs;
     })
     .map((presence) => ({
       ...presence,
@@ -755,6 +756,12 @@ export async function saveActivity(req, res) {
   const transientPresence = area.startsWith("chat:") || area.startsWith("view:");
   const cursorX = cursorValue(req.body.cursorX);
   const cursorY = cursorValue(req.body.cursorY);
+
+  if (area === "presence:clear" || area === "view:clear") {
+    project.presence = project.presence.filter((presence) => !sameId(presence.user, req.userId));
+    await project.save();
+    return res.json({ ok: true });
+  }
 
   if (area === "chat:clear") {
     project.presence = project.presence.filter(
