@@ -1,4 +1,6 @@
 import Task from "../models/task.js";
+import Project from "../models/project.js";
+import ProjectAlert from "../models/projectAlert.js";
 import User from "../models/user.js";
 import webpush from "web-push";
 
@@ -82,12 +84,101 @@ function taskMessage(task) {
   };
 }
 
+function projectOverdueMessage(project, task) {
+  return {
+    title: "Tarea vencida",
+    body: `"${task.title}" no se cumplió a tiempo en "${project.title}".`,
+    projectId: String(project._id),
+    taskId: String(task._id),
+    tag: `project-overdue-${project._id}-${task._id}`,
+    url: `/dashboard?project=${project._id}`,
+    icon: "/icons/icon-192x192.png",
+  };
+}
+
 async function removeInvalidSubscriptions(userId, endpoints) {
   if (!endpoints.length) return;
 
   await User.findByIdAndUpdate(userId, {
     $pull: { pushSubscriptions: { endpoint: { $in: endpoints } } },
   });
+}
+
+async function pushPayloadToUser(userId, payload, pusher) {
+  const user = await User.findById(userId).select("pushSubscriptions");
+  const subscriptions = (user?.pushSubscriptions || []).filter(Boolean);
+  if (!subscriptions.length) return 0;
+
+  let successCount = 0;
+  const invalidEndpoints = [];
+  const message = JSON.stringify(payload);
+
+  await Promise.all(
+    subscriptions.map(async (subscription) => {
+      try {
+        await pusher.sendNotification(subscription, message);
+        successCount += 1;
+      } catch (error) {
+        if (error?.statusCode === 404 || error?.statusCode === 410) {
+          invalidEndpoints.push(subscription.endpoint);
+        } else {
+          console.error("web push error:", error?.message || error);
+        }
+      }
+    })
+  );
+
+  await removeInvalidSubscriptions(userId, invalidEndpoints);
+  return successCount;
+}
+
+async function sendProjectOverdueAlerts(now, pusher) {
+  const projects = await Project.find({
+    tasks: {
+      $elemMatch: {
+        status: { $ne: "Completada" },
+        dueAt: { $ne: null, $lte: now },
+        overdueAlertSentAt: null,
+      },
+    },
+  }).select("title creator tasks").limit(100);
+  const sent = [];
+
+  for (const project of projects) {
+    let changed = false;
+
+    for (const task of project.tasks || []) {
+      if (task.status === "Completada" || !task.dueAt || task.overdueAlertSentAt) continue;
+      if (new Date(task.dueAt).getTime() > now.getTime()) continue;
+
+      const payload = projectOverdueMessage(project, task);
+      await ProjectAlert.create({
+        user: project.creator,
+        project: project._id,
+        type: "task",
+        title: payload.title,
+        body: payload.body,
+        data: {
+          projectId: String(project._id),
+          taskId: String(task._id),
+          overdue: true,
+        },
+      });
+      await pushPayloadToUser(project.creator, payload, pusher);
+
+      task.overdueAlertSentAt = now;
+      changed = true;
+      sent.push({
+        projectId: String(project._id),
+        taskId: String(task._id),
+        dueAt: task.dueAt.toISOString(),
+      });
+    }
+
+    if (changed) await project.save();
+  }
+
+  return sent;
 }
 
 export async function publicKey(_req, res) {
@@ -153,51 +244,54 @@ export async function sendDueReminders(req, res) {
     ...(req.userId ? { user: req.userId } : {}),
   };
   const tasks = await Task.find(query).sort({ reminderAt: 1 }).limit(100);
-  if (!tasks.length) return res.json({ ok: true, sent: [] });
-
-  const userIds = [...new Set(tasks.map((task) => String(task.user)))];
-  const users = await User.find({ _id: { $in: userIds } }).select("_id pushSubscriptions");
-  const tokensByUser = new Map(
-    users.map((user) => [String(user._id), (user.pushSubscriptions || []).filter(Boolean)])
-  );
   const sent = [];
 
-  for (const task of tasks) {
-    const subscriptions = tokensByUser.get(String(task.user)) || [];
-    if (!subscriptions.length) continue;
-
-    let successCount = 0;
-    const invalidEndpoints = [];
-    const payload = JSON.stringify(taskMessage(task));
-
-    await Promise.all(
-      subscriptions.map(async (subscription) => {
-        try {
-          await pusher.sendNotification(subscription, payload);
-          successCount += 1;
-        } catch (error) {
-          if (error?.statusCode === 404 || error?.statusCode === 410) {
-            invalidEndpoints.push(subscription.endpoint);
-          } else {
-            console.error("web push error:", error?.message || error);
-          }
-        }
-      })
+  if (tasks.length) {
+    const userIds = [...new Set(tasks.map((task) => String(task.user)))];
+    const users = await User.find({ _id: { $in: userIds } }).select("_id pushSubscriptions");
+    const tokensByUser = new Map(
+      users.map((user) => [String(user._id), (user.pushSubscriptions || []).filter(Boolean)])
     );
 
-    await removeInvalidSubscriptions(task.user, invalidEndpoints);
+    for (const task of tasks) {
+      const subscriptions = tokensByUser.get(String(task.user)) || [];
+      if (!subscriptions.length) continue;
 
-    if (successCount > 0) {
-      task.reminderSentAt = now;
-      await task.save();
-      sent.push({
-        taskId: String(task._id),
-        reminderAt: task.reminderAt.toISOString(),
-      });
+      let successCount = 0;
+      const invalidEndpoints = [];
+      const payload = JSON.stringify(taskMessage(task));
+
+      await Promise.all(
+        subscriptions.map(async (subscription) => {
+          try {
+            await pusher.sendNotification(subscription, payload);
+            successCount += 1;
+          } catch (error) {
+            if (error?.statusCode === 404 || error?.statusCode === 410) {
+              invalidEndpoints.push(subscription.endpoint);
+            } else {
+              console.error("web push error:", error?.message || error);
+            }
+          }
+        })
+      );
+
+      await removeInvalidSubscriptions(task.user, invalidEndpoints);
+
+      if (successCount > 0) {
+        task.reminderSentAt = now;
+        await task.save();
+        sent.push({
+          taskId: String(task._id),
+          reminderAt: task.reminderAt.toISOString(),
+        });
+      }
     }
   }
 
-  res.json({ ok: true, sent });
+  const projectOverdue = req.userId ? [] : await sendProjectOverdueAlerts(now, pusher);
+
+  res.json({ ok: true, sent, projectOverdue });
 }
 
 export async function cronStatus(req, res) {
@@ -212,6 +306,17 @@ export async function cronStatus(req, res) {
     reminderAt: { $ne: null, $lte: now },
     reminderSentAt: null,
   });
+  const [projectOverdueResult] = await Project.aggregate([
+    { $unwind: "$tasks" },
+    {
+      $match: {
+        "tasks.status": { $ne: "Completada" },
+        "tasks.dueAt": { $ne: null, $lte: now },
+        "tasks.overdueAlertSentAt": null,
+      },
+    },
+    { $count: "count" },
+  ]);
   const usersWithSubscriptions = await User.countDocuments({ "pushSubscriptions.0": { $exists: true } });
 
   res.json({
@@ -219,6 +324,7 @@ export async function cronStatus(req, res) {
     webPushConfigured: Boolean(getWebPush()),
     missingWebPushEnv: missingWebPushEnv(),
     pendingReminders,
+    pendingProjectOverdueTasks: projectOverdueResult?.count || 0,
     usersWithSubscriptions,
     serverTime: now.toISOString(),
   });

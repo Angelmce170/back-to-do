@@ -29,6 +29,7 @@ const projectTaskSchema = new mongoose.Schema(
     },
     createdBy: projectUserRef,
     completedAt: { type: Date, default: null },
+    overdueAlertSentAt: { type: Date, default: null },
     comments: { type: [projectCommentSchema], default: [] },
   },
   { timestamps: true }

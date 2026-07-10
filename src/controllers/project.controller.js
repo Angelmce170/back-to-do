@@ -593,10 +593,14 @@ export async function updateProjectTask(req, res) {
       const dueAt = parseDate(req.body.dueAt);
       if (dueAt === undefined) return res.status(400).json({ message: "Fecha inválida" });
       task.dueAt = dueAt;
+      task.overdueAlertSentAt = null;
     }
   }
 
   if (req.body.status !== undefined) {
+    if (!assigned) {
+      return res.status(403).json({ message: "Solo el responsable puede cambiar el estatus" });
+    }
     if (!allowedStatuses.includes(req.body.status)) {
       return res.status(400).json({ message: "Estado inválido" });
     }
