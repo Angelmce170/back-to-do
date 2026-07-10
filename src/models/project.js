@@ -16,11 +16,21 @@ const projectCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const projectTaskNoteSchema = new mongoose.Schema(
+  {
+    author: projectUserRef,
+    message: { type: String, required: true, trim: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const projectTaskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
     description: { type: String, default: "", trim: true },
     assignedTo: projectUserRef,
+    assignees: { type: [projectUserRef], default: [] },
     dueAt: { type: Date, default: null },
     status: {
       type: String,
@@ -31,6 +41,7 @@ const projectTaskSchema = new mongoose.Schema(
     completedAt: { type: Date, default: null },
     overdueAlertSentAt: { type: Date, default: null },
     comments: { type: [projectCommentSchema], default: [] },
+    notes: { type: [projectTaskNoteSchema], default: [] },
   },
   { timestamps: true }
 );

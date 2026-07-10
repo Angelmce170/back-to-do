@@ -4,9 +4,11 @@ import {
   acceptInvitation,
   addFriend,
   addTaskComment,
+  addTaskNote,
   createProject,
   createProjectTask,
   deleteAlert,
+  deleteTaskNote,
   inviteByEmail,
   inviteFriends,
   joinByCode,
@@ -45,6 +47,8 @@ router.post("/:id/invite-friends", inviteFriends);
 router.post("/:id/tasks", createProjectTask);
 router.patch("/:id/tasks/:taskId", updateProjectTask);
 router.post("/:id/tasks/:taskId/comments", addTaskComment);
+router.post("/:id/tasks/:taskId/notes", addTaskNote);
+router.delete("/:id/tasks/:taskId/notes/:noteId", deleteTaskNote);
 router.post("/:id/messages", sendProjectMessage);
 router.post("/:id/activity", saveActivity);
 

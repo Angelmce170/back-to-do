@@ -135,6 +135,17 @@ function activeMemberIds(project) {
     .map((member) => userId(member.user));
 }
 
+function taskAssigneeIds(task) {
+  const ids = (task.assignees || []).map(userId).filter(Boolean);
+  const legacyId = userId(task.assignedTo);
+  if (legacyId && !ids.includes(legacyId)) ids.push(legacyId);
+  return ids;
+}
+
+function canAccessTaskNotes(project, task, currentUserId) {
+  return isProjectLeader(project, currentUserId) || taskAssigneeIds(task).includes(userId(currentUserId));
+}
+
 function participantCount(project) {
   return (project.members || []).length;
 }
@@ -164,15 +175,29 @@ function serializeProject(project, currentUserId) {
     user: publicUser(member.user),
     invitedBy: publicUser(member.invitedBy),
   }));
-  item.tasks = (item.tasks || []).map((task) => ({
-    ...task,
-    assignedTo: publicUser(task.assignedTo),
-    createdBy: publicUser(task.createdBy),
-    comments: (task.comments || []).map((comment) => ({
-      ...comment,
-      author: publicUser(comment.author),
-    })),
-  }));
+  item.tasks = (item.tasks || []).map((task) => {
+    const assignees = (task.assignees || []).length ? task.assignees : (task.assignedTo ? [task.assignedTo] : []);
+    const canViewNotes = canAccessTaskNotes(project, task, currentUserId);
+
+    return {
+      ...task,
+      assignedTo: publicUser(task.assignedTo),
+      assignees: assignees.map(publicUser).filter(Boolean),
+      createdBy: publicUser(task.createdBy),
+      comments: (task.comments || []).map((comment) => ({
+        ...comment,
+        author: publicUser(comment.author),
+      })),
+      notes: canViewNotes
+        ? (task.notes || []).map((note) => ({
+            ...note,
+            author: publicUser(note.author),
+          }))
+        : [],
+      canViewNotes,
+      canWriteNotes: canViewNotes,
+    };
+  });
   item.messages = (item.messages || []).map((message) => ({
     ...message,
     author: publicUser(message.author),
@@ -205,8 +230,10 @@ async function populateProject(project) {
     { path: "members.invitedBy", select: "name email avatarColor" },
     { path: "pendingEmails.invitedBy", select: "name email avatarColor" },
     { path: "tasks.assignedTo", select: "name email avatarColor" },
+    { path: "tasks.assignees", select: "name email avatarColor" },
     { path: "tasks.createdBy", select: "name email avatarColor" },
     { path: "tasks.comments.author", select: "name email avatarColor" },
+    { path: "tasks.notes.author", select: "name email avatarColor" },
     { path: "messages.author", select: "name email avatarColor" },
     { path: "messages.to", select: "name email avatarColor" },
     { path: "presence.user", select: "name email avatarColor" },
@@ -546,8 +573,13 @@ export async function createProjectTask(req, res) {
   const title = text(req.body.title);
   if (!title) return res.status(400).json({ message: "El título de la tarea es requerido" });
 
-  const assignedTo = text(req.body.assignedTo);
-  if (!assignedTo || !isActiveMember(project, assignedTo)) {
+  const assigneeIds = cleanUserIds(req.body.assigneeIds);
+  const legacyAssignedTo = text(req.body.assignedTo);
+  if (legacyAssignedTo && isObjectId(legacyAssignedTo) && !assigneeIds.includes(legacyAssignedTo)) {
+    assigneeIds.push(legacyAssignedTo);
+  }
+
+  if (!assigneeIds.length || assigneeIds.some((id) => !isActiveMember(project, id))) {
     return res.status(400).json({ message: "Selecciona un miembro activo del proyecto" });
   }
 
@@ -557,7 +589,8 @@ export async function createProjectTask(req, res) {
   const task = {
     title,
     description: text(req.body.description),
-    assignedTo,
+    assignedTo: assigneeIds[0],
+    assignees: assigneeIds,
     dueAt,
     status: "Pendiente",
     createdBy: req.userId,
@@ -566,16 +599,20 @@ export async function createProjectTask(req, res) {
   appendActivity(project, req.userId, "tareas", `asignó la tarea "${title}"`);
   await project.save();
 
-  if (assignedTo !== req.userId) {
-    await createProjectAlert({
-      user: assignedTo,
-      project,
-      type: "task",
-      title: "Nueva tarea asignada",
-      body: `Te asignaron "${title}" en "${project.title}".`,
-      data: { projectId: String(project._id) },
-    });
-  }
+  await Promise.all(
+    assigneeIds
+      .filter((id) => id !== req.userId)
+      .map((id) =>
+        createProjectAlert({
+          user: id,
+          project,
+          type: "task",
+          title: "Nueva tarea asignada",
+          body: `Te asignaron "${title}" en "${project.title}".`,
+          data: { projectId: String(project._id) },
+        })
+      )
+  );
 
   const populated = await populateProject(project);
   res.status(201).json({ project: serializeProject(populated, req.userId) });
@@ -592,7 +629,7 @@ export async function updateProjectTask(req, res) {
   if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
 
   const leader = isProjectLeader(project, req.userId);
-  const assigned = sameId(task.assignedTo, req.userId);
+  const assigned = taskAssigneeIds(task).includes(userId(req.userId));
   if (!leader && !assigned) {
     return res.status(403).json({ message: "Solo puedes actualizar tus tareas asignadas" });
   }
@@ -602,12 +639,17 @@ export async function updateProjectTask(req, res) {
   if (leader) {
     if (req.body.title !== undefined) task.title = text(req.body.title, task.title);
     if (req.body.description !== undefined) task.description = text(req.body.description);
-    if (req.body.assignedTo !== undefined) {
+    if (req.body.assigneeIds !== undefined || req.body.assignedTo !== undefined) {
+      const nextAssignees = cleanUserIds(req.body.assigneeIds);
       const assignedTo = text(req.body.assignedTo);
-      if (!isActiveMember(project, assignedTo)) {
-        return res.status(400).json({ message: "El asignado debe ser miembro activo" });
+      if (assignedTo && isObjectId(assignedTo) && !nextAssignees.includes(assignedTo)) {
+        nextAssignees.push(assignedTo);
       }
-      task.assignedTo = assignedTo;
+      if (!nextAssignees.length || nextAssignees.some((id) => !isActiveMember(project, id))) {
+        return res.status(400).json({ message: "Los responsables deben ser miembros activos" });
+      }
+      task.assignedTo = nextAssignees[0];
+      task.assignees = nextAssignees;
     }
     if (req.body.dueAt !== undefined) {
       const dueAt = parseDate(req.body.dueAt);
@@ -640,15 +682,21 @@ export async function updateProjectTask(req, res) {
       body: `Completaron "${task.title}" en "${project.title}".`,
       data: { projectId: String(project._id), taskId: String(task._id) },
     });
-  } else if (leader && !sameId(task.assignedTo, req.userId)) {
-    await createProjectAlert({
-      user: task.assignedTo,
-      project,
-      type: "task",
-      title: "Tarea actualizada",
-      body: `Se actualizó "${task.title}" en "${project.title}".`,
-      data: { projectId: String(project._id), taskId: String(task._id) },
-    });
+  } else if (leader) {
+    await Promise.all(
+      taskAssigneeIds(task)
+        .filter((id) => id !== req.userId)
+        .map((id) =>
+          createProjectAlert({
+            user: id,
+            project,
+            type: "task",
+            title: "Tarea actualizada",
+            body: `Se actualizó "${task.title}" en "${project.title}".`,
+            data: { projectId: String(project._id), taskId: String(task._id) },
+          })
+        )
+    );
   }
 
   const populated = await populateProject(project);
@@ -672,7 +720,7 @@ export async function addTaskComment(req, res) {
   appendActivity(project, req.userId, "comentarios", `comentó en "${task.title}"`);
   await project.save();
 
-  const recipients = [userId(task.assignedTo), userId(project.creator)].filter(
+  const recipients = [...taskAssigneeIds(task), userId(project.creator)].filter(
     (id, index, list) => id && id !== req.userId && list.indexOf(id) === index
   );
   await Promise.all(
@@ -687,6 +735,70 @@ export async function addTaskComment(req, res) {
       })
     )
   );
+
+  const populated = await populateProject(project);
+  res.json({ project: serializeProject(populated, req.userId) });
+}
+
+export async function addTaskNote(req, res) {
+  const project = await findProjectForUser(req.params.id, req.userId);
+  if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
+  if (!isActiveMember(project, req.userId)) {
+    return res.status(403).json({ message: "Acepta la invitación para escribir notas" });
+  }
+
+  const task = project.tasks.id(req.params.taskId);
+  if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
+  if (!canAccessTaskNotes(project, task, req.userId)) {
+    return res.status(403).json({ message: "Solo el líder o responsables pueden escribir notas" });
+  }
+
+  const message = text(req.body.message);
+  if (!message) return res.status(400).json({ message: "Escribe una nota" });
+
+  task.notes.push({ author: req.userId, message });
+  appendActivity(project, req.userId, "notas", `agregó una nota en "${task.title}"`);
+  await project.save();
+
+  const recipients = [...taskAssigneeIds(task), userId(project.creator)].filter(
+    (id, index, list) => id && id !== req.userId && list.indexOf(id) === index
+  );
+  await Promise.all(
+    recipients.map((id) =>
+      createProjectAlert({
+        user: id,
+        project,
+        type: "message",
+        title: "Nueva nota en tarea",
+        body: `Agregaron una nota en "${task.title}".`,
+        data: { projectId: String(project._id), taskId: String(task._id) },
+      })
+    )
+  );
+
+  const populated = await populateProject(project);
+  res.json({ project: serializeProject(populated, req.userId) });
+}
+
+export async function deleteTaskNote(req, res) {
+  const project = await findProjectForUser(req.params.id, req.userId);
+  if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
+
+  const task = project.tasks.id(req.params.taskId);
+  if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
+  if (!canAccessTaskNotes(project, task, req.userId)) {
+    return res.status(403).json({ message: "No puedes modificar las notas de esta tarea" });
+  }
+
+  const note = task.notes.id(req.params.noteId);
+  if (!note) return res.status(404).json({ message: "Nota no encontrada" });
+  if (!sameId(note.author, req.userId) && !isProjectLeader(project, req.userId)) {
+    return res.status(403).json({ message: "Solo quien creó la nota o el líder puede borrarla" });
+  }
+
+  task.notes.pull(note._id);
+  appendActivity(project, req.userId, "notas", `borró una nota en "${task.title}"`);
+  await project.save();
 
   const populated = await populateProject(project);
   res.json({ project: serializeProject(populated, req.userId) });
@@ -753,7 +865,7 @@ export async function saveActivity(req, res) {
 
   const area = text(req.body.area, "proyecto");
   const action = text(req.body.action, "editando");
-  const transientPresence = area.startsWith("chat:") || area.startsWith("view:");
+  const transientPresence = area.startsWith("chat:") || area.startsWith("view:") || area.startsWith("note:");
   const cursorX = cursorValue(req.body.cursorX);
   const cursorY = cursorValue(req.body.cursorY);
 
