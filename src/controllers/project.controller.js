@@ -642,6 +642,7 @@ export async function updateProjectTask(req, res) {
   }
 
   const previousStatus = task.status;
+  const previousAssigneeIds = taskAssigneeIds(task);
 
   if (leader) {
     if (req.body.title !== undefined) task.title = text(req.body.title, task.title);
@@ -690,21 +691,59 @@ export async function updateProjectTask(req, res) {
       data: { projectId: String(project._id), taskId: String(task._id) },
     });
   } else if (leader) {
+    const recipients = [...previousAssigneeIds, ...taskAssigneeIds(task), userId(project.creator)].filter(
+      (id, index, list) => id && id !== req.userId && list.indexOf(id) === index
+    );
+
     await Promise.all(
-      taskAssigneeIds(task)
-        .filter((id) => id !== req.userId)
-        .map((id) =>
-          createProjectAlert({
-            user: id,
-            project,
-            type: "task",
-            title: "Tarea actualizada",
-            body: `Se actualizó "${task.title}" en "${project.title}".`,
-            data: { projectId: String(project._id), taskId: String(task._id) },
-          })
-        )
+      recipients.map((id) =>
+        createProjectAlert({
+          user: id,
+          project,
+          type: "task",
+          title: "Tarea actualizada",
+          body: `Se actualizó "${task.title}" en "${project.title}".`,
+          data: { projectId: String(project._id), taskId: String(task._id), kind: "updated" },
+        })
+      )
     );
   }
+
+  const populated = await populateProject(project);
+  res.json({ project: serializeProject(populated, req.userId) });
+}
+
+export async function deleteProjectTask(req, res) {
+  const project = await findProjectForUser(req.params.id, req.userId);
+  if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
+  if (!isProjectLeader(project, req.userId)) {
+    return res.status(403).json({ message: "Solo el líder puede borrar tareas" });
+  }
+
+  const task = project.tasks.id(req.params.taskId);
+  if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
+
+  const taskTitle = task.title;
+  const recipients = [...taskAssigneeIds(task), userId(project.creator)].filter(
+    (id, index, list) => id && id !== req.userId && list.indexOf(id) === index
+  );
+
+  project.tasks.pull(task._id);
+  appendActivity(project, req.userId, "tareas", `borró "${taskTitle}"`);
+  await project.save();
+
+  await Promise.all(
+    recipients.map((id) =>
+      createProjectAlert({
+        user: id,
+        project,
+        type: "task",
+        title: "Tarea eliminada",
+        body: `Se eliminó "${taskTitle}" en "${project.title}".`,
+        data: { projectId: String(project._id), taskId: String(req.params.taskId), kind: "deleted" },
+      })
+    )
+  );
 
   const populated = await populateProject(project);
   res.json({ project: serializeProject(populated, req.userId) });

@@ -8,6 +8,7 @@ import {
   createProject,
   createProjectTask,
   deleteAlert,
+  deleteProjectTask,
   deleteTaskNote,
   inviteByEmail,
   inviteFriends,
@@ -46,6 +47,7 @@ router.post("/:id/invite-email", inviteByEmail);
 router.post("/:id/invite-friends", inviteFriends);
 router.post("/:id/tasks", createProjectTask);
 router.patch("/:id/tasks/:taskId", updateProjectTask);
+router.delete("/:id/tasks/:taskId", deleteProjectTask);
 router.post("/:id/tasks/:taskId/comments", addTaskComment);
 router.post("/:id/tasks/:taskId/notes", addTaskNote);
 router.delete("/:id/tasks/:taskId/notes/:noteId", deleteTaskNote);
