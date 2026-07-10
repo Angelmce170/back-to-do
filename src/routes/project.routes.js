@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { auth } from "../middleware/auth.js";
+import { auth, authFromQuery } from "../middleware/auth.js";
 import {
   acceptInvitation,
   addFriend,
@@ -15,6 +15,7 @@ import {
   listProjects,
   markAlertRead,
   projectDetails,
+  projectStream,
   saveActivity,
   searchUsers,
   sendProjectMessage,
@@ -24,6 +25,8 @@ import {
 } from "../controllers/project.controller.js";
 
 const router = Router();
+
+router.get("/:id/stream", authFromQuery, projectStream);
 
 router.use(auth);
 

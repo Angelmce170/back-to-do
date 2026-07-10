@@ -227,6 +227,21 @@ async function findProjectForUser(projectId, currentUserId) {
   return populateProject(project);
 }
 
+async function projectSnapshot(projectId, currentUserId) {
+  if (!isObjectId(projectId)) return null;
+
+  const project = await Project.findById(projectId);
+  if (!project || !isProjectMember(project, currentUserId)) return null;
+
+  const populated = await populateProject(project);
+  return serializeProject(populated, currentUserId);
+}
+
+function writeStreamEvent(res, eventName, payload) {
+  res.write(`event: ${eventName}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
 async function pushToUser(userIdValue, payload) {
   const pusher = getWebPush();
   if (!pusher) return;
@@ -349,6 +364,65 @@ export async function projectDetails(req, res) {
   if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
 
   res.json({ project: serializeProject(project, req.userId) });
+}
+
+export async function projectStream(req, res) {
+  const firstSnapshot = await projectSnapshot(req.params.id, req.userId);
+  if (!firstSnapshot) return res.status(404).json({ message: "Proyecto no encontrado" });
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  let closed = false;
+  let lastPayload = "";
+  let sending = false;
+
+  const sendSnapshot = async () => {
+    if (closed || sending) return;
+    sending = true;
+
+    try {
+      const snapshot = await projectSnapshot(req.params.id, req.userId);
+      if (!snapshot) {
+        writeStreamEvent(res, "error", { message: "Proyecto no encontrado" });
+        res.end();
+        closed = true;
+        return;
+      }
+
+      const payload = JSON.stringify(snapshot);
+      if (payload !== lastPayload) {
+        lastPayload = payload;
+        writeStreamEvent(res, "project", { project: snapshot });
+      }
+    } catch {
+      writeStreamEvent(res, "ping", { ok: false });
+    } finally {
+      sending = false;
+    }
+  };
+
+  writeStreamEvent(res, "project", { project: firstSnapshot });
+  lastPayload = JSON.stringify(firstSnapshot);
+
+  const timer = setInterval(sendSnapshot, 850);
+  const keepAlive = setInterval(() => writeStreamEvent(res, "ping", { ok: true }), 10000);
+  const closeTimer = setTimeout(() => {
+    if (!closed) {
+      writeStreamEvent(res, "ping", { reconnect: true });
+      res.end();
+    }
+  }, 25000);
+
+  req.on("close", () => {
+    closed = true;
+    clearInterval(timer);
+    clearInterval(keepAlive);
+    clearTimeout(closeTimer);
+  });
 }
 
 export async function createProject(req, res) {
