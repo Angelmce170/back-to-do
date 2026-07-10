@@ -728,10 +728,10 @@ export async function addTaskComment(req, res) {
       createProjectAlert({
         user: id,
         project,
-        type: "message",
+        type: "task",
         title: "Nuevo comentario",
         body: `Comentaron en "${task.title}".`,
-        data: { projectId: String(project._id), taskId: String(task._id) },
+        data: { projectId: String(project._id), taskId: String(task._id), kind: "comment" },
       })
     )
   );
@@ -768,10 +768,10 @@ export async function addTaskNote(req, res) {
       createProjectAlert({
         user: id,
         project,
-        type: "message",
+        type: "task",
         title: "Nueva nota en tarea",
         body: `Agregaron una nota en "${task.title}".`,
-        data: { projectId: String(project._id), taskId: String(task._id) },
+        data: { projectId: String(project._id), taskId: String(task._id), kind: "note" },
       })
     )
   );
