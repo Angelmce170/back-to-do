@@ -501,14 +501,16 @@ export async function joinByCode(req, res) {
 
   appendActivity(project, req.userId, "miembros", "se unió por enlace");
   await project.save();
-  await createProjectAlert({
-    user: project.creator,
-    project,
-    type: "system",
-    title: "Nuevo participante",
-    body: "Alguien se unió a tu proyecto por enlace.",
-    data: { projectId: String(project._id) },
-  });
+  if (!sameId(project.creator, req.userId)) {
+    await createProjectAlert({
+      user: project.creator,
+      project,
+      type: "system",
+      title: "Nuevo participante",
+      body: "Alguien se unió a tu proyecto por enlace.",
+      data: { projectId: String(project._id) },
+    });
+  }
 
   const populated = await populateProject(project);
   res.json({ project: serializeProject(populated, req.userId) });
@@ -605,7 +607,7 @@ export async function updateProjectTask(req, res) {
   appendActivity(project, req.userId, "tareas", `actualizó "${task.title}"`);
   await project.save();
 
-  if (previousStatus !== "Completada" && task.status === "Completada") {
+  if (previousStatus !== "Completada" && task.status === "Completada" && !sameId(project.creator, req.userId)) {
     await createProjectAlert({
       user: project.creator,
       project,
@@ -727,6 +729,16 @@ export async function saveActivity(req, res) {
 
   const area = text(req.body.area, "proyecto");
   const action = text(req.body.action, "editando");
+  const typingPresence = area.startsWith("chat:");
+
+  if (area === "chat:clear") {
+    project.presence = project.presence.filter(
+      (presence) => !sameId(presence.user, req.userId) || !String(presence.area || "").startsWith("chat:")
+    );
+    await project.save();
+    return res.json({ ok: true });
+  }
+
   const existing = project.presence.find((presence) => sameId(presence.user, req.userId));
 
   if (existing) {
@@ -737,7 +749,7 @@ export async function saveActivity(req, res) {
     project.presence.push({ user: req.userId, area, action, updatedAt: new Date() });
   }
 
-  appendActivity(project, req.userId, area, action);
+  if (!typingPresence) appendActivity(project, req.userId, area, action);
   await project.save();
   res.json({ ok: true });
 }

@@ -109,6 +109,11 @@ export async function saveSubscription(req, res) {
   const user = await User.findById(req.userId).select("pushSubscriptions");
   if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
+  await User.updateMany(
+    { _id: { $ne: req.userId } },
+    { $pull: { pushSubscriptions: { endpoint: subscription.endpoint } } }
+  );
+
   user.pushSubscriptions = (user.pushSubscriptions || []).filter(
     (item) => item?.endpoint !== subscription.endpoint
   );
