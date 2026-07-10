@@ -146,6 +146,11 @@ function canAccessTaskNotes(project, task, currentUserId) {
   return isProjectLeader(project, currentUserId) || taskAssigneeIds(task).includes(userId(currentUserId));
 }
 
+function canViewProjectTask(project, task, currentUserId) {
+  if (isProjectLeader(project, currentUserId)) return true;
+  return isActiveMember(project, currentUserId) && taskAssigneeIds(task).includes(userId(currentUserId));
+}
+
 function participantCount(project) {
   return (project.members || []).length;
 }
@@ -175,29 +180,31 @@ function serializeProject(project, currentUserId) {
     user: publicUser(member.user),
     invitedBy: publicUser(member.invitedBy),
   }));
-  item.tasks = (item.tasks || []).map((task) => {
-    const assignees = (task.assignees || []).length ? task.assignees : (task.assignedTo ? [task.assignedTo] : []);
-    const canViewNotes = canAccessTaskNotes(project, task, currentUserId);
+  item.tasks = (item.tasks || [])
+    .filter((task) => canViewProjectTask(project, task, currentUserId))
+    .map((task) => {
+      const assignees = (task.assignees || []).length ? task.assignees : (task.assignedTo ? [task.assignedTo] : []);
+      const canViewNotes = canAccessTaskNotes(project, task, currentUserId);
 
-    return {
-      ...task,
-      assignedTo: publicUser(task.assignedTo),
-      assignees: assignees.map(publicUser).filter(Boolean),
-      createdBy: publicUser(task.createdBy),
-      comments: (task.comments || []).map((comment) => ({
-        ...comment,
-        author: publicUser(comment.author),
-      })),
-      notes: canViewNotes
-        ? (task.notes || []).map((note) => ({
-            ...note,
-            author: publicUser(note.author),
-          }))
-        : [],
-      canViewNotes,
-      canWriteNotes: canViewNotes,
-    };
-  });
+      return {
+        ...task,
+        assignedTo: publicUser(task.assignedTo),
+        assignees: assignees.map(publicUser).filter(Boolean),
+        createdBy: publicUser(task.createdBy),
+        comments: (task.comments || []).map((comment) => ({
+          ...comment,
+          author: publicUser(comment.author),
+        })),
+        notes: canViewNotes
+          ? (task.notes || []).map((note) => ({
+              ...note,
+              author: publicUser(note.author),
+            }))
+          : [],
+        canViewNotes,
+        canWriteNotes: canViewNotes,
+      };
+    });
   item.messages = (item.messages || []).map((message) => ({
     ...message,
     author: publicUser(message.author),
