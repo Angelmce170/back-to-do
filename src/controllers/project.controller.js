@@ -755,8 +755,9 @@ export async function addTaskNote(req, res) {
 
   const message = text(req.body.message);
   if (!message) return res.status(400).json({ message: "Escribe una nota" });
+  const mode = req.body.mode === "shared" ? "shared" : "individual";
 
-  task.notes.push({ author: req.userId, message });
+  task.notes.push({ author: req.userId, message, mode });
   appendActivity(project, req.userId, "notas", `agregó una nota en "${task.title}"`);
   await project.save();
 

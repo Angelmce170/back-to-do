@@ -20,6 +20,11 @@ const projectTaskNoteSchema = new mongoose.Schema(
   {
     author: projectUserRef,
     message: { type: String, required: true, trim: true },
+    mode: {
+      type: String,
+      enum: ["individual", "shared"],
+      default: "individual",
+    },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: true }
