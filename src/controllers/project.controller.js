@@ -7,15 +7,10 @@ import User from "../models/user.js";
 
 const allowedStatuses = ["Pendiente", "En Progreso", "Completada"];
 const maxAttachmentSize = 4 * 1024 * 1024;
-const maxDocumentLength = 50_000;
 const alertRetentionMs = 1000 * 60 * 60 * 24 * 183;
 
 function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
-}
-
-function documentText(value) {
-  return typeof value === "string" ? value.slice(0, maxDocumentLength) : "";
 }
 
 function userId(value) {
@@ -179,12 +174,6 @@ function serializeProject(project, currentUserId) {
     ...activity,
     user: publicUser(activity.user),
   }));
-  item.document = {
-    content: typeof item.document?.content === "string" ? item.document.content : "",
-    updatedBy: publicUser(item.document?.updatedBy),
-    updatedAt: item.document?.updatedAt || null,
-    version: Number(item.document?.version || 0),
-  };
   item.presence = (item.presence || [])
     .filter((presence) => {
       const updatedAt = new Date(presence.updatedAt).getTime();
@@ -207,7 +196,6 @@ async function populateProject(project) {
     { path: "members.user", select: "name email avatarColor" },
     { path: "members.invitedBy", select: "name email avatarColor" },
     { path: "pendingEmails.invitedBy", select: "name email avatarColor" },
-    { path: "document.updatedBy", select: "name email avatarColor" },
     { path: "tasks.assignedTo", select: "name email avatarColor" },
     { path: "tasks.createdBy", select: "name email avatarColor" },
     { path: "tasks.comments.author", select: "name email avatarColor" },
@@ -225,21 +213,6 @@ async function findProjectForUser(projectId, currentUserId) {
   if (!project || !isProjectMember(project, currentUserId)) return null;
 
   return populateProject(project);
-}
-
-async function projectSnapshot(projectId, currentUserId) {
-  if (!isObjectId(projectId)) return null;
-
-  const project = await Project.findById(projectId);
-  if (!project || !isProjectMember(project, currentUserId)) return null;
-
-  const populated = await populateProject(project);
-  return serializeProject(populated, currentUserId);
-}
-
-function writeStreamEvent(res, eventName, payload) {
-  res.write(`event: ${eventName}\n`);
-  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 async function pushToUser(userIdValue, payload) {
@@ -364,65 +337,6 @@ export async function projectDetails(req, res) {
   if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
 
   res.json({ project: serializeProject(project, req.userId) });
-}
-
-export async function projectStream(req, res) {
-  const firstSnapshot = await projectSnapshot(req.params.id, req.userId);
-  if (!firstSnapshot) return res.status(404).json({ message: "Proyecto no encontrado" });
-
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders?.();
-
-  let closed = false;
-  let lastPayload = "";
-  let sending = false;
-
-  const sendSnapshot = async () => {
-    if (closed || sending) return;
-    sending = true;
-
-    try {
-      const snapshot = await projectSnapshot(req.params.id, req.userId);
-      if (!snapshot) {
-        writeStreamEvent(res, "error", { message: "Proyecto no encontrado" });
-        res.end();
-        closed = true;
-        return;
-      }
-
-      const payload = JSON.stringify(snapshot);
-      if (payload !== lastPayload) {
-        lastPayload = payload;
-        writeStreamEvent(res, "project", { project: snapshot });
-      }
-    } catch {
-      writeStreamEvent(res, "ping", { ok: false });
-    } finally {
-      sending = false;
-    }
-  };
-
-  writeStreamEvent(res, "project", { project: firstSnapshot });
-  lastPayload = JSON.stringify(firstSnapshot);
-
-  const timer = setInterval(sendSnapshot, 850);
-  const keepAlive = setInterval(() => writeStreamEvent(res, "ping", { ok: true }), 10000);
-  const closeTimer = setTimeout(() => {
-    if (!closed) {
-      writeStreamEvent(res, "ping", { reconnect: true });
-      res.end();
-    }
-  }, 25000);
-
-  req.on("close", () => {
-    closed = true;
-    clearInterval(timer);
-    clearInterval(keepAlive);
-    clearTimeout(closeTimer);
-  });
 }
 
 export async function createProject(req, res) {
@@ -824,49 +738,6 @@ export async function sendProjectMessage(req, res) {
   res.status(201).json({ project: serializeProject(populated, req.userId) });
 }
 
-export async function updateProjectDocument(req, res) {
-  const project = await findProjectForUser(req.params.id, req.userId);
-  if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
-  if (!isActiveMember(project, req.userId)) {
-    return res.status(403).json({ message: "Acepta la invitación para editar el documento" });
-  }
-
-  const content = documentText(req.body.content);
-  const previousUpdateTime = project.document?.updatedAt
-    ? new Date(project.document.updatedAt).getTime()
-    : 0;
-
-  project.document = {
-    content,
-    updatedBy: req.userId,
-    updatedAt: new Date(),
-    version: Number(project.document?.version || 0) + 1,
-  };
-
-  const existing = project.presence.find((presence) => sameId(presence.user, req.userId));
-  if (existing) {
-    existing.area = "documento";
-    existing.action = "editando el documento";
-    existing.updatedAt = new Date();
-  } else {
-    project.presence.push({
-      user: req.userId,
-      area: "documento",
-      action: "editando el documento",
-      updatedAt: new Date(),
-    });
-  }
-
-  if (!previousUpdateTime || Date.now() - previousUpdateTime > 60000) {
-    appendActivity(project, req.userId, "documento", "actualizó el documento");
-  }
-
-  await project.save();
-
-  const populated = await populateProject(project);
-  res.json({ project: serializeProject(populated, req.userId) });
-}
-
 export async function saveActivity(req, res) {
   const project = await findProjectForUser(req.params.id, req.userId);
   if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
@@ -874,7 +745,7 @@ export async function saveActivity(req, res) {
 
   const area = text(req.body.area, "proyecto");
   const action = text(req.body.action, "editando");
-  const transientPresence = area.startsWith("chat:") || area === "documento";
+  const typingPresence = area.startsWith("chat:");
 
   if (area === "chat:clear") {
     project.presence = project.presence.filter(
@@ -894,7 +765,7 @@ export async function saveActivity(req, res) {
     project.presence.push({ user: req.userId, area, action, updatedAt: new Date() });
   }
 
-  if (!transientPresence) appendActivity(project, req.userId, area, action);
+  if (!typingPresence) appendActivity(project, req.userId, area, action);
   await project.save();
   res.json({ ok: true });
 }

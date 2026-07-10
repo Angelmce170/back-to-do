@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { auth, authFromQuery } from "../middleware/auth.js";
+import { auth } from "../middleware/auth.js";
 import {
   acceptInvitation,
   addFriend,
@@ -15,18 +15,14 @@ import {
   listProjects,
   markAlertRead,
   projectDetails,
-  projectStream,
   saveActivity,
   searchUsers,
   sendProjectMessage,
   updateProject,
-  updateProjectDocument,
   updateProjectTask,
 } from "../controllers/project.controller.js";
 
 const router = Router();
-
-router.get("/:id/stream", authFromQuery, projectStream);
 
 router.use(auth);
 
@@ -50,7 +46,6 @@ router.post("/:id/tasks", createProjectTask);
 router.patch("/:id/tasks/:taskId", updateProjectTask);
 router.post("/:id/tasks/:taskId/comments", addTaskComment);
 router.post("/:id/messages", sendProjectMessage);
-router.patch("/:id/document", updateProjectDocument);
 router.post("/:id/activity", saveActivity);
 
 export default router;
