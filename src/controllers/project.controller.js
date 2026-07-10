@@ -13,6 +13,13 @@ function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function cursorValue(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return null;
+
+  return Math.min(Math.max(numberValue, 0), 1);
+}
+
 function userId(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -745,7 +752,9 @@ export async function saveActivity(req, res) {
 
   const area = text(req.body.area, "proyecto");
   const action = text(req.body.action, "editando");
-  const typingPresence = area.startsWith("chat:");
+  const transientPresence = area.startsWith("chat:") || area.startsWith("view:");
+  const cursorX = cursorValue(req.body.cursorX);
+  const cursorY = cursorValue(req.body.cursorY);
 
   if (area === "chat:clear") {
     project.presence = project.presence.filter(
@@ -760,12 +769,14 @@ export async function saveActivity(req, res) {
   if (existing) {
     existing.area = area;
     existing.action = action;
+    if (cursorX !== null) existing.cursorX = cursorX;
+    if (cursorY !== null) existing.cursorY = cursorY;
     existing.updatedAt = new Date();
   } else {
-    project.presence.push({ user: req.userId, area, action, updatedAt: new Date() });
+    project.presence.push({ user: req.userId, area, action, cursorX, cursorY, updatedAt: new Date() });
   }
 
-  if (!typingPresence) appendActivity(project, req.userId, area, action);
+  if (!transientPresence) appendActivity(project, req.userId, area, action);
   await project.save();
   res.json({ ok: true });
 }

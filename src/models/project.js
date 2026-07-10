@@ -55,6 +55,8 @@ const projectPresenceSchema = new mongoose.Schema(
     user: projectUserRef,
     area: { type: String, default: "proyecto", trim: true },
     action: { type: String, default: "editando", trim: true },
+    cursorX: { type: Number, default: null },
+    cursorY: { type: Number, default: null },
     updatedAt: { type: Date, default: Date.now },
   },
   { _id: false }
