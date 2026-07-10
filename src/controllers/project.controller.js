@@ -7,10 +7,15 @@ import User from "../models/user.js";
 
 const allowedStatuses = ["Pendiente", "En Progreso", "Completada"];
 const maxAttachmentSize = 4 * 1024 * 1024;
+const maxDocumentLength = 50_000;
 const alertRetentionMs = 1000 * 60 * 60 * 24 * 183;
 
 function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+function documentText(value) {
+  return typeof value === "string" ? value.slice(0, maxDocumentLength) : "";
 }
 
 function userId(value) {
@@ -174,6 +179,12 @@ function serializeProject(project, currentUserId) {
     ...activity,
     user: publicUser(activity.user),
   }));
+  item.document = {
+    content: typeof item.document?.content === "string" ? item.document.content : "",
+    updatedBy: publicUser(item.document?.updatedBy),
+    updatedAt: item.document?.updatedAt || null,
+    version: Number(item.document?.version || 0),
+  };
   item.presence = (item.presence || [])
     .filter((presence) => {
       const updatedAt = new Date(presence.updatedAt).getTime();
@@ -196,6 +207,7 @@ async function populateProject(project) {
     { path: "members.user", select: "name email avatarColor" },
     { path: "members.invitedBy", select: "name email avatarColor" },
     { path: "pendingEmails.invitedBy", select: "name email avatarColor" },
+    { path: "document.updatedBy", select: "name email avatarColor" },
     { path: "tasks.assignedTo", select: "name email avatarColor" },
     { path: "tasks.createdBy", select: "name email avatarColor" },
     { path: "tasks.comments.author", select: "name email avatarColor" },
@@ -738,6 +750,49 @@ export async function sendProjectMessage(req, res) {
   res.status(201).json({ project: serializeProject(populated, req.userId) });
 }
 
+export async function updateProjectDocument(req, res) {
+  const project = await findProjectForUser(req.params.id, req.userId);
+  if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
+  if (!isActiveMember(project, req.userId)) {
+    return res.status(403).json({ message: "Acepta la invitación para editar el documento" });
+  }
+
+  const content = documentText(req.body.content);
+  const previousUpdateTime = project.document?.updatedAt
+    ? new Date(project.document.updatedAt).getTime()
+    : 0;
+
+  project.document = {
+    content,
+    updatedBy: req.userId,
+    updatedAt: new Date(),
+    version: Number(project.document?.version || 0) + 1,
+  };
+
+  const existing = project.presence.find((presence) => sameId(presence.user, req.userId));
+  if (existing) {
+    existing.area = "documento";
+    existing.action = "editando el documento";
+    existing.updatedAt = new Date();
+  } else {
+    project.presence.push({
+      user: req.userId,
+      area: "documento",
+      action: "editando el documento",
+      updatedAt: new Date(),
+    });
+  }
+
+  if (!previousUpdateTime || Date.now() - previousUpdateTime > 60000) {
+    appendActivity(project, req.userId, "documento", "actualizó el documento");
+  }
+
+  await project.save();
+
+  const populated = await populateProject(project);
+  res.json({ project: serializeProject(populated, req.userId) });
+}
+
 export async function saveActivity(req, res) {
   const project = await findProjectForUser(req.params.id, req.userId);
   if (!project) return res.status(404).json({ message: "Proyecto no encontrado" });
@@ -745,7 +800,7 @@ export async function saveActivity(req, res) {
 
   const area = text(req.body.area, "proyecto");
   const action = text(req.body.action, "editando");
-  const typingPresence = area.startsWith("chat:");
+  const transientPresence = area.startsWith("chat:") || area === "documento";
 
   if (area === "chat:clear") {
     project.presence = project.presence.filter(
@@ -765,7 +820,7 @@ export async function saveActivity(req, res) {
     project.presence.push({ user: req.userId, area, action, updatedAt: new Date() });
   }
 
-  if (!typingPresence) appendActivity(project, req.userId, area, action);
+  if (!transientPresence) appendActivity(project, req.userId, area, action);
   await project.save();
   res.json({ ok: true });
 }

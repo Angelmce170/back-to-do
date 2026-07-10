@@ -19,6 +19,7 @@ import {
   searchUsers,
   sendProjectMessage,
   updateProject,
+  updateProjectDocument,
   updateProjectTask,
 } from "../controllers/project.controller.js";
 
@@ -46,6 +47,7 @@ router.post("/:id/tasks", createProjectTask);
 router.patch("/:id/tasks/:taskId", updateProjectTask);
 router.post("/:id/tasks/:taskId/comments", addTaskComment);
 router.post("/:id/messages", sendProjectMessage);
+router.patch("/:id/document", updateProjectDocument);
 router.post("/:id/activity", saveActivity);
 
 export default router;

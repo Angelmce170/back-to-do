@@ -120,6 +120,12 @@ const projectSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    document: {
+      content: { type: String, default: "" },
+      updatedBy: projectUserRef,
+      updatedAt: { type: Date, default: null },
+      version: { type: Number, default: 0 },
+    },
     tasks: { type: [projectTaskSchema], default: [] },
     messages: { type: [projectMessageSchema], default: [] },
     presence: { type: [projectPresenceSchema], default: [] },
