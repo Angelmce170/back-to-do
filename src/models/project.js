@@ -34,7 +34,7 @@ const projectTaskSchema = new mongoose.Schema(
     dueAt: { type: Date, default: null },
     status: {
       type: String,
-      enum: ["Pendiente", "En Progreso", "Completada"],
+      enum: ["Pendiente", "En proceso", "En Progreso", "Completada"],
       default: "Pendiente",
     },
     createdBy: projectUserRef,

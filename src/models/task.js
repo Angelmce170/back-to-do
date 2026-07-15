@@ -18,7 +18,7 @@ const taskShema = new mongoose.Schema(
         },
         status:{
             type: String,
-            enum:['Pendiente', 'En Progreso', 'Completada'],
+            enum:['Pendiente', 'En proceso', 'En Progreso', 'Completada'],
             default:'Pendiente',
         },
         reminderAt:{

@@ -5,13 +5,17 @@ import Project from "../models/project.js";
 import ProjectAlert from "../models/projectAlert.js";
 import User from "../models/user.js";
 
-const allowedStatuses = ["Pendiente", "En Progreso", "Completada"];
+const allowedStatuses = ["Pendiente", "En proceso", "En Progreso", "Completada"];
 const maxAttachmentSize = 4 * 1024 * 1024;
 const alertRetentionMs = 1000 * 60 * 60 * 24 * 183;
 const presenceTimeoutMs = 9000;
 
 function text(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+function normalizeStatus(value) {
+  return value === "En Progreso" ? "En proceso" : value;
 }
 
 function cursorValue(value) {
@@ -188,6 +192,7 @@ function serializeProject(project, currentUserId) {
 
       return {
         ...task,
+        status: normalizeStatus(task.status),
         assignedTo: publicUser(task.assignedTo),
         assignees: assignees.map(publicUser).filter(Boolean),
         createdBy: publicUser(task.createdBy),
@@ -668,14 +673,15 @@ export async function updateProjectTask(req, res) {
   }
 
   if (req.body.status !== undefined) {
+    const nextStatus = normalizeStatus(req.body.status);
     if (!assigned) {
       return res.status(403).json({ message: "Solo el responsable puede cambiar el estatus" });
     }
-    if (!allowedStatuses.includes(req.body.status)) {
+    if (!allowedStatuses.includes(nextStatus)) {
       return res.status(400).json({ message: "Estado inválido" });
     }
-    task.status = req.body.status;
-    task.completedAt = req.body.status === "Completada" ? new Date() : null;
+    task.status = nextStatus;
+    task.completedAt = nextStatus === "Completada" ? new Date() : null;
   }
 
   appendActivity(project, req.userId, "tareas", `actualizó "${task.title}"`);

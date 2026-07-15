@@ -1,6 +1,15 @@
 import Task from "../models/task.js";
 
-const allowed = ["Pendiente", "En Progreso", "Completada"]; // <-- usa este nombre en todos lados
+const allowed = ["Pendiente", "En proceso", "En Progreso", "Completada"];
+
+function normalizeStatus(value) {
+  return value === "En Progreso" ? "En proceso" : value;
+}
+
+function serializeTask(task) {
+  const item = task.toObject ? task.toObject() : task;
+  return { ...item, status: normalizeStatus(item.status) };
+}
 
 function parseReminderAt(value) {
   if (value === undefined) return undefined;
@@ -12,18 +21,19 @@ function parseReminderAt(value) {
 
 export async function list(req, res) {
   const items = await Task.find({ user: req.userId, deleted: false }).sort({ createdAt: -1 });
-  res.json({ items });
+  res.json({ items: items.map(serializeTask) });
 }
 
 export async function create(req, res) {
   const { title, description = "", status = "Pendiente", clienteId, reminderAt } = req.body;
+  const normalizedStatus = normalizeStatus(status);
   if (!title) return res.status(400).json({ message: "El título es requerido" });
 
   const task = await Task.create({
     user: req.userId,
     title,
     description,
-    status: allowed.includes(status) ? status : "Pendiente", // <-- allowed
+    status: allowed.includes(normalizedStatus) ? normalizedStatus : "Pendiente",
     reminderAt: parseReminderAt(reminderAt) ?? null,
     reminderSentAt: null,
     clienteId,
@@ -35,13 +45,14 @@ export async function update(req, res) {
   const { id } = req.params;
   const { title, description, status, reminderAt } = req.body;
 
-  if (status && !allowed.includes(status))
+  const normalizedStatus = normalizeStatus(status);
+  if (status && !allowed.includes(normalizedStatus))
     return res.status(400).json({ message: "Estado inválido" });
 
   const changes = {};
   if (title !== undefined) changes.title = title;
   if (description !== undefined) changes.description = description;
-  if (status !== undefined) changes.status = status;
+  if (status !== undefined) changes.status = normalizedStatus;
   if (reminderAt !== undefined) {
     const parsedReminderAt = parseReminderAt(reminderAt);
     if (parsedReminderAt === undefined) {
@@ -58,7 +69,7 @@ export async function update(req, res) {
     { new: true }
   );
   if (!task) return res.status(404).json({ message: "Tarea no encontrada" });
-  res.json({ task });
+  res.json({ task: serializeTask(task) });
 }
 
 export async function remove(req, res) {
@@ -86,7 +97,7 @@ export async function bulksync(req, res) {
         clienteId: String(t.clienteId),
         title: String(t.title),
         description: t.description ?? "",
-        status: allowed.includes(t.status) ? t.status : "Pendiente",
+        status: allowed.includes(normalizeStatus(t.status)) ? normalizeStatus(t.status) : "Pendiente",
         reminderAt: parseReminderAt(t.reminderAt) ?? null,
       }));
 
